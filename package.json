@@ -1,0 +1,52 @@
+{
+  "name": "computed",
+  "version": "0.0.0",
+  "private": true,
+  "main": "electron/main.js",
+  "build": {
+    "appId": "com.leeyng.desktop",
+    "productName": "Computed",
+    "copyright": "Copyright © 2024 electron",
+    "compression": "maximum",
+    "directories": {
+      "output": "electron-build/",
+      "buildResources": "electron/assets"
+    },
+    "files": [
+      "electron/main.js",
+      "electron/controller/**",
+      "electron/preload/**",
+      "electron/dist/**"
+    ],
+    "mac": {
+      "target": "dmg",
+      "icon": "electron/assets/icon.icns"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "electron/assets/icon.ico",
+      "artifactName": "${productName}_${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "electron/assets/icon.ico",
+      "shortcutName": "Computed"
+    }
+  },
+  "scripts": {
+    "app:dist": "electron-builder",
+    "app:mac": "electron-builder --mac",
+    "app:win": "electron-builder --win --x64",
+    "start": "nodemon --exec electron . --watch ./ --ext .js,.html"
+  },
+  "dependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "devDependencies": {
+    "electron": "^29.2.0",
+    "electron-builder": "^24.13.3",
+    "eslint": "^8.49.0",
+    "npm-run-all2": "^6.1.2"
+  }
+}
