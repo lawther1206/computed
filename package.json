@@ -1,12 +1,14 @@
 {
   "name": "computed",
-  "version": "0.0.0",
+  "version": "0.0.2",
+  "description": "从中国银行官网获取并导出人民币外汇牌价",
+  "author": "Computed",
   "private": true,
   "main": "electron/main.js",
   "build": {
     "appId": "com.leeyng.desktop",
-    "productName": "Computed",
-    "copyright": "Copyright © 2024 electron",
+    "productName": "中国银行外汇牌价",
+    "copyright": "Copyright © 2026",
     "compression": "maximum",
     "directories": {
       "output": "electron-build/",
@@ -16,7 +18,9 @@
       "electron/main.js",
       "electron/controller/**",
       "electron/preload/**",
-      "electron/dist/**"
+      "electron/services/**",
+      "electron/dist/**",
+      "electron/assets/**"
     ],
     "mac": {
       "target": "dmg",
@@ -25,28 +29,32 @@
     "win": {
       "target": "nsis",
       "icon": "electron/assets/icon.ico",
-      "artifactName": "${productName}_${version}.${ext}"
+      "artifactName": "${productName}_${version}.${ext}",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "installerIcon": "electron/assets/icon.ico",
-      "shortcutName": "Computed"
+      "shortcutName": "中国银行外汇牌价"
     }
   },
   "scripts": {
     "app:dist": "electron-builder",
     "app:mac": "electron-builder --mac",
     "app:win": "electron-builder --win --x64",
-    "start": "nodemon --exec electron . --watch ./ --ext .js,.html"
+    "start": "nodemon --exec electron . --watch ./ --ext .js,.html,.css",
+    "test": "node --test"
   },
   "dependencies": {
-    "nodemon": "^3.1.0"
+    "cheerio": "1.0.0-rc.12",
+    "xlsx": "0.18.5"
   },
   "devDependencies": {
     "electron": "^29.2.0",
     "electron-builder": "^24.13.3",
     "eslint": "^8.49.0",
+    "nodemon": "^3.1.0",
     "npm-run-all2": "^6.1.2"
   }
 }

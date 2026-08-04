@@ -1,55 +1,79 @@
-const { app, BrowserWindow, screen } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, net } = require('electron')
 const path = require('path')
+const { fetchExchangeRates, exportRatesToExcel } = require('./services/exchangeService')
 
-require('./controller/changeWindowSize')
+let mainWindow
 
-
-const createWindow = (base) => {
-  const { winWidth, winHeight, x, y } = base
-  const win = new BrowserWindow({
-    width: winWidth,
-    height: winHeight,
-    x,
-    y,
-    transparent: true, //背景透明
-    alwaysOnTop: true,
-    hasShadow: false,// 去掉阴影
-    // 不使用原生窗口
-    frame: false,
-    icon: path.join(__dirname, './assets/logo.png'),
+const createWindow = () => {
+  mainWindow = new BrowserWindow({
+    width: 1080,
+    height: 760,
+    minWidth: 900,
+    minHeight: 600,
+    title: '中国银行外汇牌价',
+    backgroundColor: '#f5f7f4',
+    icon: path.join(__dirname, 'assets/logo.png'),
+    show: false,
     webPreferences: {
-      nodeIntegration: true, //在渲染进程使用 Node.js API
-      backgroundThrottling: false, // 防止透明背景被节流
-      preload: path.join(__dirname, './preload/index.js')
-    }
+      preload: path.join(__dirname, 'preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
   })
-  const indexHtml = path.join(__dirname, '/dist/index.html')
-  win.loadFile(indexHtml);
-  // 下面的url为自己启动vite项目的url。
-  // win.loadURL('http://localhost:5173/')
-  // 打开electron的开发者工具
-  // win.webContents.openDevTools({ mode: 'detach' })
+
+  mainWindow.setMenuBarVisibility(false)
+  mainWindow.loadFile(path.join(__dirname, 'dist/index.html'))
+  mainWindow.once('ready-to-show', () => mainWindow.show())
 }
 
+ipcMain.handle('rates:fetch', async () => (
+  fetchExchangeRates((url, options) => net.fetch(url, options))
+))
+
+ipcMain.handle('rates:export', async (_event, payload) => {
+  const rates = Array.isArray(payload?.rates) ? payload.rates : []
+
+  if (rates.length === 0) {
+    throw new Error('请至少选择一个币种后再导出')
+  }
+
+  const date = payload.date || new Date().toISOString().slice(0, 10)
+  const defaultName = `中行外汇牌价_${date}.xlsx`
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '保存中国银行外汇牌价表',
+    defaultPath: path.join(app.getPath('documents'), defaultName),
+    filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }],
+  })
+
+  if (result.canceled || !result.filePath) {
+    return { canceled: true }
+  }
+
+  const filePath = result.filePath.toLowerCase().endsWith('.xlsx')
+    ? result.filePath
+    : `${result.filePath}.xlsx`
+
+  exportRatesToExcel({
+    filePath,
+    date,
+    unit: payload.unit,
+    rates,
+    source: payload.source,
+    fetchedAt: payload.fetchedAt,
+  })
+
+  return { canceled: false, filePath }
+})
+
 app.whenReady().then(() => {
-  const primaryDisplay = screen.getPrimaryDisplay()
-  const { width, height } = primaryDisplay.workAreaSize //
-  // 窗口尺寸
-  const winWidth = 210
-  const winHeight = 210
+  createWindow()
 
-  // 计算右下角坐标（留 10px 边距）
-  const x = width - winWidth - 10
-  const y = height - winHeight - 10
-
-  createWindow({ winWidth, winHeight, x, y })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  if (process.platform !== 'darwin') app.quit()
 })

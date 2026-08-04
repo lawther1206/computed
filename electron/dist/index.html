@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'" />
+    <title>中国银行外汇牌价</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="../assets/logo.png" alt="" class="brand-logo" />
+          <div>
+            <h1>中国银行外汇牌价</h1>
+            <p>BOC · 人民币外汇牌价</p>
+          </div>
+        </div>
+        <div class="source-status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="sourceText">等待获取数据</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="summary" aria-label="汇率概览">
+          <div class="summary-primary">
+            <span class="summary-label">牌价日期</span>
+            <strong id="rateDate">--</strong>
+            <span id="rateDateHint">尚未更新</span>
+          </div>
+          <div class="summary-stat">
+            <span>中行币种</span>
+            <strong id="currencyCount">--</strong>
+          </div>
+          <div class="summary-stat">
+            <span>已选导出</span>
+            <strong><span id="selectedCount">0</span><small> 项</small></strong>
+          </div>
+          <div class="summary-stat featured-rate">
+            <span id="usdRateLabel">100 美元现汇卖出价</span>
+            <strong id="usdRate">--</strong>
+          </div>
+        </section>
+
+        <section class="workspace">
+          <div class="workspace-heading">
+            <div>
+              <h2>中国银行牌价</h2>
+              <p id="updateTime">获取时间：--</p>
+            </div>
+            <div class="actions">
+              <label class="unit-control" for="unitInput">
+                <span>中行单位</span>
+                <select id="unitInput">
+                  <option value="100" selected>100</option>
+                  <option value="1">1</option>
+                </select>
+              </label>
+              <button id="refreshButton" class="button button-secondary" type="button" title="刷新汇率">
+                <span id="refreshIcon" class="button-icon" aria-hidden="true">↻</span>
+                <span id="refreshLabel">刷新</span>
+              </button>
+              <button id="exportButton" class="button button-primary" type="button" disabled>
+                <span class="button-icon download-icon" aria-hidden="true">↓</span>
+                导出 Excel
+              </button>
+            </div>
+          </div>
+
+          <div class="filters">
+            <label class="search-box" for="searchInput">
+              <span aria-hidden="true">⌕</span>
+              <input id="searchInput" type="search" placeholder="搜索币种名称或代码" autocomplete="off" />
+            </label>
+            <span id="filterResult" class="filter-result">0 个币种</span>
+            <div class="selection-actions">
+              <button id="defaultSelectionButton" class="filter-button" type="button">默认 14 项</button>
+              <button id="selectAllButton" class="filter-button" type="button">全选</button>
+              <button id="clearSelectionButton" class="filter-button" type="button">清空</button>
+            </div>
+          </div>
+
+          <div id="errorState" class="message-state" hidden>
+            <strong>牌价加载失败</strong>
+            <p id="errorMessage"></p>
+            <button id="retryButton" class="text-button" type="button">重新获取</button>
+          </div>
+
+          <div id="tableWrap" class="table-wrap" hidden>
+            <table>
+              <thead>
+                <tr>
+                  <th class="check-cell">
+                    <input id="selectAll" type="checkbox" aria-label="选择全部币种" />
+                  </th>
+                  <th>币种</th>
+                  <th>代码</th>
+                  <th class="number-cell">中行单位</th>
+                  <th class="number-cell">现汇买入</th>
+                  <th class="number-cell">现钞买入</th>
+                  <th class="number-cell">现汇卖出</th>
+                  <th class="number-cell">现钞卖出</th>
+                  <th class="number-cell">中行折算价</th>
+                </tr>
+              </thead>
+              <tbody id="ratesBody"></tbody>
+            </table>
+            <div id="emptySearch" class="empty-search" hidden>未找到匹配的币种</div>
+          </div>
+
+          <div id="loadingState" class="loading-state">
+            <span class="spinner" aria-hidden="true"></span>
+            <span>正在获取中国银行外汇牌价…</span>
+          </div>
+        </section>
+
+        <p class="disclaimer"><span id="unitNotice">当前按 100 单位外币换算人民币</span>；实际交易价格以中国银行办理业务时为准。</p>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

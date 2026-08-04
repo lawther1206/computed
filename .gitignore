@@ -13,6 +13,11 @@ dist
 dist-ssr
 coverage
 *.local
+/electron-build/
+
+# The Electron renderer is maintained as static application source.
+!electron/dist/
+!electron/dist/**
 
 /cypress/videos/
 /cypress/screenshots/
