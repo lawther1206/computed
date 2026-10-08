@@ -39,7 +39,7 @@
             <strong><span id="selectedCount">0</span><small> 项</small></strong>
           </div>
           <div class="summary-stat featured-rate">
-            <span id="usdRateLabel">100 美元现汇卖出价</span>
+            <span id="usdRateLabel">100 美元中行折算价</span>
             <strong id="usdRate">--</strong>
           </div>
         </section>
@@ -51,20 +51,61 @@
               <p id="updateTime">获取时间：--</p>
             </div>
             <div class="actions">
-              <label class="unit-control" for="unitInput">
-                <span>中行单位</span>
-                <select id="unitInput">
-                  <option value="100" selected>100</option>
-                  <option value="1">1</option>
-                </select>
-              </label>
+              <div class="unit-control">
+                <span id="unitLabel">中行单位</span>
+                <div id="unitDropdown" class="unit-dropdown">
+                  <button
+                    id="unitInput"
+                    class="unit-trigger"
+                    type="button"
+                    aria-labelledby="unitLabel unitValue"
+                    aria-haspopup="listbox"
+                    aria-controls="unitMenu"
+                    aria-expanded="false"
+                  >
+                    <span id="unitValue">100</span>
+                  </button>
+                  <div id="unitMenu" class="unit-menu" role="listbox" aria-labelledby="unitLabel" hidden>
+                    <button class="unit-option" type="button" role="option" data-value="100" aria-selected="true">
+                      <span class="unit-option-value">100</span>
+                      <span class="unit-option-note">标准牌价</span>
+                      <span class="unit-option-check" aria-hidden="true">✓</span>
+                    </button>
+                    <button class="unit-option" type="button" role="option" data-value="1" aria-selected="false">
+                      <span class="unit-option-value">1</span>
+                      <span class="unit-option-note">单位换算</span>
+                      <span class="unit-option-check" aria-hidden="true">✓</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
               <button id="refreshButton" class="button button-secondary" type="button" title="刷新汇率">
                 <span id="refreshIcon" class="button-icon" aria-hidden="true">↻</span>
                 <span id="refreshLabel">刷新</span>
               </button>
               <button id="exportButton" class="button button-primary" type="button" disabled>
                 <span class="button-icon download-icon" aria-hidden="true">↓</span>
-                导出 Excel
+                <span id="exportLabel">导出 Excel</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="data-toolbar">
+            <div class="query-controls">
+              <label class="field-control" for="queryDate">
+                <span>牌价日期</span>
+                <input id="queryDate" type="date" />
+              </label>
+              <button id="queryButton" class="button button-secondary" type="button">
+                <span id="queryLabel">查询</span>
+              </button>
+            </div>
+            <div class="database-actions">
+              <button id="uploadButton" class="button button-secondary" type="button">
+                <span id="uploadLabel">上传 Excel</span>
+              </button>
+              <button id="importTodayButton" class="button button-database" type="button">
+                <span id="importTodayLabel">导入今日数据</span>
               </button>
             </div>
           </div>
@@ -112,7 +153,7 @@
 
           <div id="loadingState" class="loading-state">
             <span class="spinner" aria-hidden="true"></span>
-            <span>正在获取中国银行外汇牌价…</span>
+            <span id="loadingText">正在获取中国银行外汇牌价…</span>
           </div>
         </section>
 

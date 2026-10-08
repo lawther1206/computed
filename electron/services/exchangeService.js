@@ -3,6 +3,10 @@ const XLSX = require('xlsx')
 
 const API_URL = 'https://www.boc.cn/sourcedb/whpj/index.html'
 const SOURCE_NAME = '中国银行官网外汇牌价'
+const DATABASE_API_URL = 'http://101.35.107.105:3010'
+const DATABASE_SOURCE_NAME = '外汇牌价历史数据库'
+const UPLOAD_URL = `${DATABASE_API_URL}/exchange-rate/upload`
+const QUERY_URL = `${DATABASE_API_URL}/exchange-rate/query`
 
 const DEFAULT_CURRENCY_CODES = [
   'AUD', 'CAD', 'CZK', 'EUR', 'GBP', 'HKD', 'JPY',
@@ -56,6 +60,12 @@ const parsePrice = (value) => {
   if (value === null || value === undefined || value.trim() === '') return null
   const price = Number(value.trim())
   return Number.isFinite(price) ? price : null
+}
+
+const normalizeNumber = (value) => {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
 }
 
 const normalizeUpdatedAt = (dateText, timeText) => {
@@ -131,6 +141,65 @@ const fetchExchangeRates = async (fetcher = global.fetch) => {
   return parseBocPage(await response.text())
 }
 
+const normalizeDatabaseResult = (data, date) => {
+  if (!data || data.state !== true) throw new Error(data?.message || '历史牌价查询失败')
+  const result = data.data?.result
+  if (!Array.isArray(result)) throw new Error('历史牌价接口返回了无法识别的数据')
+
+  const rates = result.map((rate) => ({
+    code: String(rate.currencyCode || ''),
+    name: String(rate.currencyName || ''),
+    unit: Number(rate.bankUnit) || 100,
+    exchangeBuy: normalizeNumber(rate.spotBuyingRate),
+    cashBuy: normalizeNumber(rate.cashBuyingRate),
+    exchangeSell: normalizeNumber(rate.spotSellingRate),
+    cashSell: normalizeNumber(rate.cashSellingRate),
+    middle: normalizeNumber(rate.bocConversionRate),
+    updatedAt: String(rate.publishedAt || date),
+  }))
+  const latestUpdatedAt = rates
+    .map((rate) => rate.updatedAt)
+    .sort((a, b) => b.localeCompare(a))[0] || date
+
+  return {
+    bank: 'BOC',
+    bankName: '中国银行',
+    date: latestUpdatedAt.slice(0, 10),
+    updatedAt: latestUpdatedAt,
+    fetchedAt: new Date().toISOString(),
+    source: DATABASE_SOURCE_NAME,
+    defaultCurrencyCodes: DEFAULT_CURRENCY_CODES,
+    rates,
+  }
+}
+
+const queryHistoricalRates = async (fetcher = global.fetch, date) => {
+  if (typeof fetcher !== 'function') throw new Error('当前运行环境不支持网络请求')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+    throw new Error('历史查询日期格式必须为 YYYY-MM-DD')
+  }
+  let response
+  try {
+    response = await fetcher(QUERY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ date }),
+      signal: AbortSignal.timeout(30000),
+    })
+  } catch (error) {
+    throw new Error(`无法连接历史牌价接口：${error.message}`)
+  }
+
+  let data
+  try {
+    data = await response.json()
+  } catch {
+    throw new Error(`历史牌价接口返回异常（HTTP ${response.status}）`)
+  }
+  if (!response.ok) throw new Error(data?.message || `历史牌价查询失败（HTTP ${response.status}）`)
+  return normalizeDatabaseResult(data, date)
+}
+
 const scaleRatesToUnit = (rates, requestedUnit = 100) => {
   const unit = Number(requestedUnit)
   if (![1, 100].includes(unit)) {
@@ -151,22 +220,38 @@ const scaleRatesToUnit = (rates, requestedUnit = 100) => {
   })
 }
 
-const exportRatesToExcel = ({ filePath, date, unit = 100, rates, source, fetchedAt }) => {
+const createWorkbookRows = (rates, unit) => scaleRatesToUnit(rates, unit).map((rate, index) => ({
+  序号: index + 1,
+  币种代码: rate.code,
+  币种名称: rate.name,
+  中行单位: rate.unit,
+  现汇买入价: rate.exchangeBuy,
+  现钞买入价: rate.cashBuy,
+  现汇卖出价: rate.exchangeSell,
+  现钞卖出价: rate.cashSell,
+  中行折算价: rate.middle,
+  发布时间: rate.updatedAt,
+}))
+
+const setRateSheetLayout = (sheet, headerRow, dataRowCount) => {
+  sheet['!cols'] = [
+    { wch: 8 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 15 },
+    { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 22 },
+  ]
+  sheet['!autofilter'] = { ref: `A${headerRow}:J${headerRow + dataRowCount}` }
+
+  for (let row = headerRow + 1; row <= headerRow + dataRowCount; row += 1) {
+    for (const column of ['E', 'F', 'G', 'H', 'I']) {
+      if (sheet[`${column}${row}`]) sheet[`${column}${row}`].z = '0.000000'
+    }
+  }
+}
+
+const createRatesWorkbook = ({ date, unit = 100, rates, source, fetchedAt }) => {
   const title = `中国银行外汇牌价（${date}）`
   const scaledRates = scaleRatesToUnit(rates, unit)
   const displayUnit = scaledRates[0]?.unit || unit
-  const rows = scaledRates.map((rate, index) => ({
-    序号: index + 1,
-    币种代码: rate.code,
-    币种名称: rate.name,
-    中行单位: rate.unit,
-    现汇买入价: rate.exchangeBuy,
-    现钞买入价: rate.cashBuy,
-    现汇卖出价: rate.exchangeSell,
-    现钞卖出价: rate.cashSell,
-    中行折算价: rate.middle,
-    发布时间: rate.updatedAt,
-  }))
+  const rows = createWorkbookRows(rates, unit)
 
   const sheet = XLSX.utils.json_to_sheet(rows, { origin: 'A4' })
   XLSX.utils.sheet_add_aoa(sheet, [
@@ -180,17 +265,7 @@ const exportRatesToExcel = ({ filePath, date, unit = 100, rates, source, fetched
     XLSX.utils.decode_range('A2:J2'),
     XLSX.utils.decode_range('A3:J3'),
   ]
-  sheet['!cols'] = [
-    { wch: 8 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 15 },
-    { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 22 },
-  ]
-  sheet['!autofilter'] = { ref: `A4:J${rows.length + 4}` }
-
-  for (let row = 5; row <= rows.length + 4; row += 1) {
-    for (const column of ['E', 'F', 'G', 'H', 'I']) {
-      if (sheet[`${column}${row}`]) sheet[`${column}${row}`].z = '0.000000'
-    }
-  }
+  setRateSheetLayout(sheet, 4, rows.length)
 
   const notes = XLSX.utils.aoa_to_sheet([
     ['字段', '说明'],
@@ -210,16 +285,80 @@ const exportRatesToExcel = ({ filePath, date, unit = 100, rates, source, fetched
   workbook.Props = { Title: title, Subject: '中国银行外汇牌价', Author: '中国银行外汇牌价工具' }
   XLSX.utils.book_append_sheet(workbook, sheet, '中行外汇牌价')
   XLSX.utils.book_append_sheet(workbook, notes, '字段说明')
-  XLSX.writeFile(workbook, filePath, { compression: true })
+  return workbook
+}
+
+const createRatesWorkbookBuffer = (payload) => XLSX.write(
+  createRatesWorkbook(payload),
+  { type: 'buffer', bookType: 'xlsx', compression: true },
+)
+
+const createUploadWorkbookBuffer = ({ rates, unit = 100 }) => {
+  const rows = createWorkbookRows(rates, unit)
+  const sheet = XLSX.utils.json_to_sheet(rows)
+  setRateSheetLayout(sheet, 1, rows.length)
+
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, '中行外汇牌价')
+  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: true })
+}
+
+const exportRatesToExcel = ({ filePath, ...payload }) => {
+  XLSX.writeFile(createRatesWorkbook(payload), filePath, { compression: true })
+}
+
+const uploadWorkbook = async (fetcher = global.fetch, buffer, fileName) => {
+  if (typeof fetcher !== 'function') throw new Error('当前运行环境不支持网络请求')
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Excel 文件内容为空')
+  if (buffer.length > 5 * 1024 * 1024) throw new Error('Excel 文件不能超过 5 MB')
+  if (!/\.xlsx$/i.test(String(fileName || ''))) throw new Error('仅支持 .xlsx 文件')
+
+  const formData = new FormData()
+  formData.append(
+    'file',
+    new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    fileName,
+  )
+
+  let response
+  try {
+    response = await fetcher(UPLOAD_URL, {
+      method: 'POST',
+      body: formData,
+      signal: AbortSignal.timeout(60000),
+    })
+  } catch (error) {
+    throw new Error(`无法连接牌价导入接口：${error.message}`)
+  }
+
+  let data
+  try {
+    data = await response.json()
+  } catch {
+    throw new Error(`牌价导入接口返回异常（HTTP ${response.status}）`)
+  }
+  if (!response.ok || data.state !== true) {
+    throw new Error(data?.message || `牌价导入失败（HTTP ${response.status}）`)
+  }
+  return data
 }
 
 module.exports = {
   API_URL,
   SOURCE_NAME,
+  DATABASE_API_URL,
+  UPLOAD_URL,
+  QUERY_URL,
   DEFAULT_CURRENCY_CODES,
   CURRENCY_CODES_BY_NAME,
   parseBocPage,
   fetchExchangeRates,
+  normalizeDatabaseResult,
+  queryHistoricalRates,
   scaleRatesToUnit,
+  createRatesWorkbook,
+  createRatesWorkbookBuffer,
+  createUploadWorkbookBuffer,
+  uploadWorkbook,
   exportRatesToExcel,
 }

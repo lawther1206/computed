@@ -1,6 +1,6 @@
 {
   "name": "computed",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "从中国银行官网获取并导出人民币外汇牌价",
   "author": "Computed",
   "private": true,

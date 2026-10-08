@@ -8,12 +8,24 @@ const elements = {
   usdRate: document.querySelector('#usdRate'),
   usdRateLabel: document.querySelector('#usdRateLabel'),
   unitInput: document.querySelector('#unitInput'),
+  unitDropdown: document.querySelector('#unitDropdown'),
+  unitValue: document.querySelector('#unitValue'),
+  unitMenu: document.querySelector('#unitMenu'),
+  unitOptions: [...document.querySelectorAll('.unit-option')],
   unitNotice: document.querySelector('#unitNotice'),
   updateTime: document.querySelector('#updateTime'),
   refreshButton: document.querySelector('#refreshButton'),
   refreshIcon: document.querySelector('#refreshIcon'),
   refreshLabel: document.querySelector('#refreshLabel'),
   exportButton: document.querySelector('#exportButton'),
+  exportLabel: document.querySelector('#exportLabel'),
+  queryDate: document.querySelector('#queryDate'),
+  queryButton: document.querySelector('#queryButton'),
+  queryLabel: document.querySelector('#queryLabel'),
+  uploadButton: document.querySelector('#uploadButton'),
+  uploadLabel: document.querySelector('#uploadLabel'),
+  importTodayButton: document.querySelector('#importTodayButton'),
+  importTodayLabel: document.querySelector('#importTodayLabel'),
   searchInput: document.querySelector('#searchInput'),
   filterResult: document.querySelector('#filterResult'),
   selectAll: document.querySelector('#selectAll'),
@@ -21,6 +33,7 @@ const elements = {
   tableWrap: document.querySelector('#tableWrap'),
   emptySearch: document.querySelector('#emptySearch'),
   loadingState: document.querySelector('#loadingState'),
+  loadingText: document.querySelector('#loadingText'),
   errorState: document.querySelector('#errorState'),
   errorMessage: document.querySelector('#errorMessage'),
   retryButton: document.querySelector('#retryButton'),
@@ -39,6 +52,8 @@ const state = {
   query: '',
   loading: false,
   exporting: false,
+  uploading: false,
+  importing: false,
   refreshCooldown: 0,
   unit: [1, 100].includes(storedUnit)
     ? storedUnit
@@ -47,6 +62,12 @@ const state = {
 
 let toastTimer
 let refreshTimer
+
+const getToday = () => {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60 * 1000
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10)
+}
 
 const formatPrice = (value) => {
   if (value === null || value === undefined) return '--'
@@ -115,13 +136,14 @@ const getVisibleRates = () => {
   ))
 }
 
-const getRateKey = (rate) => rate.code || rate.name
+const getRateKey = (rate) => `${rate.code || rate.name}|${rate.updatedAt || ''}`
 
 const updateSelectionUi = () => {
   const visible = getVisibleRates()
   const selectedVisibleCount = visible.filter((rate) => state.selected.has(getRateKey(rate))).length
   elements.selectedCount.textContent = String(state.selected.size)
-  elements.exportButton.disabled = state.loading || state.exporting || state.selected.size === 0
+  elements.exportButton.disabled = state.loading || state.exporting || state.uploading
+    || state.importing || state.selected.size === 0
   elements.selectAll.checked = visible.length > 0 && selectedVisibleCount === visible.length
   elements.selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length
 }
@@ -165,89 +187,184 @@ const createRateRow = (rate) => {
 
 const renderTable = () => {
   const visible = getVisibleRates()
+  const hasRates = state.data.rates.length > 0
   elements.ratesBody.replaceChildren(...visible.map(createRateRow))
   elements.filterResult.textContent = `${visible.length} 个币种`
+  elements.emptySearch.textContent = hasRates
+    ? '未找到匹配的币种'
+    : `${state.data.date} 暂无外汇牌价数据`
   elements.emptySearch.hidden = visible.length > 0
   updateSelectionUi()
 }
 
 const updateRefreshButton = () => {
-  elements.refreshButton.disabled = state.loading || state.refreshCooldown > 0
+  const busy = state.loading || state.uploading || state.importing
+  elements.refreshButton.disabled = busy || state.refreshCooldown > 0
   elements.refreshIcon.style.animation = state.loading ? 'spin 800ms linear infinite' : ''
   elements.refreshLabel.textContent = state.refreshCooldown > 0
     ? `刷新（${state.refreshCooldown}s）`
     : '刷新'
 }
 
+const updateOperationButtons = () => {
+  const busy = state.loading || state.uploading || state.importing
+  const queryingToday = elements.queryDate.value === getToday()
+  elements.queryButton.disabled = busy || (queryingToday && state.refreshCooldown > 0)
+  elements.uploadButton.disabled = busy
+  elements.importTodayButton.disabled = busy
+  updateRefreshButton()
+  updateSelectionUi()
+}
+
 const startRefreshCooldown = () => {
   clearInterval(refreshTimer)
   state.refreshCooldown = 10
-  updateRefreshButton()
+  updateOperationButtons()
   refreshTimer = setInterval(() => {
     state.refreshCooldown -= 1
     if (state.refreshCooldown <= 0) {
       state.refreshCooldown = 0
       clearInterval(refreshTimer)
     }
-    updateRefreshButton()
+    updateOperationButtons()
   }, 1000)
 }
 
-const setLoading = (loading) => {
+const setLoading = (loading, message = '正在获取中国银行外汇牌价…') => {
   state.loading = loading
+  elements.loadingText.textContent = message
   elements.loadingState.hidden = !loading
   elements.tableWrap.hidden = loading || !state.data
   if (loading) elements.errorState.hidden = true
-  updateRefreshButton()
-  updateSelectionUi()
+  updateOperationButtons()
 }
 
 const renderSummary = () => {
   const { date, updatedAt, source, rates } = state.data
+  const hasRates = rates.length > 0
   const usd = rates.find((rate) => rate.code === 'USD')
   const displayUsd = usd ? scaleRateForDisplay(usd) : null
   const unitText = formatUnit(state.unit)
   elements.rateDate.textContent = formatDate(date)
-  elements.rateDateHint.textContent = '最新一笔牌价发布时间'
+  elements.rateDateHint.textContent = hasRates ? '最新一笔牌价发布时间' : '该日期暂无牌价记录'
   elements.currencyCount.textContent = String(rates.length)
-  elements.usdRateLabel.textContent = `${unitText} 美元现汇卖出价`
-  elements.usdRate.textContent = displayUsd ? `¥ ${formatPrice(displayUsd.exchangeSell)}` : '--'
+  elements.usdRateLabel.textContent = `${unitText} 美元中行折算价`
+  elements.usdRate.textContent = displayUsd ? `¥ ${formatPrice(displayUsd.middle)}` : '--'
   elements.unitNotice.textContent = `当前按 ${unitText} 单位外币换算人民币`
-  elements.updateTime.textContent = `中行牌价更新时间：${updatedAt}`
+  elements.updateTime.textContent = hasRates ? `中行牌价更新时间：${updatedAt}` : `查询日期：${date}`
   elements.sourceText.textContent = source
   elements.sourceStatus.className = 'source-status ready'
 }
 
-const loadRates = async () => {
-  setLoading(true)
+const applyRates = (data) => {
+  state.data = data
+  const defaultCodes = new Set(data.defaultCurrencyCodes)
+  state.selected = new Set(
+    data.rates.filter((rate) => defaultCodes.has(rate.code)).map(getRateKey),
+  )
+  renderSummary()
+  renderTable()
+  elements.tableWrap.hidden = false
+}
+
+const loadRates = async (loader = () => window.exchangeApi.fetchRates(), message) => {
+  setLoading(true, message)
   try {
-    const data = await window.exchangeApi.fetchRates()
-    state.data = data
-    const availableCodes = new Set(data.rates.map((rate) => rate.code))
-    state.selected = new Set(data.defaultCurrencyCodes.filter((code) => availableCodes.has(code)))
-    renderSummary()
-    renderTable()
-    elements.tableWrap.hidden = false
+    applyRates(await loader())
   } catch (error) {
     const message = cleanError(error)
     if (state.data) {
-      showToast(`刷新失败：${message}`, true)
+      showToast(`获取失败：${message}`, true)
     } else {
       elements.errorMessage.textContent = message
       elements.errorState.hidden = false
+      elements.sourceText.textContent = '中行牌价获取失败'
+      elements.sourceStatus.className = 'source-status error'
     }
-    elements.sourceText.textContent = '中行牌价获取失败'
-    elements.sourceStatus.className = 'source-status error'
     if (!state.data) elements.filterResult.textContent = '0 个币种'
   } finally {
     setLoading(false)
   }
 }
 
+const syncDateControls = () => {
+  const today = getToday()
+  elements.queryDate.max = today
+  updateOperationButtons()
+}
+
+const queryRates = () => {
+  const today = getToday()
+  const date = elements.queryDate.value
+  if (!date) {
+    showToast('请选择牌价日期', true)
+    elements.queryDate.focus()
+    return
+  }
+  if (date > today) {
+    showToast('只能查询今天或今天之前的数据', true)
+    return
+  }
+
+  if (date === today) {
+    if (state.refreshCooldown > 0) return
+    startRefreshCooldown()
+    loadRates(() => window.exchangeApi.fetchRates(), '正在获取今日中国银行外汇牌价…')
+    return
+  }
+
+  loadRates(
+    () => window.exchangeApi.queryHistoricalRates(date),
+    `正在查询 ${date} 的历史牌价…`,
+  )
+}
+
+const summarizeUpload = (response) => {
+  const rowCount = response?.data?.rowCount
+  const publishedTimes = response?.data?.publishedTimes
+  const countText = Number.isFinite(Number(rowCount)) ? `，共 ${rowCount} 条` : ''
+  const timeText = Array.isArray(publishedTimes) && publishedTimes.length > 0
+    ? `，${publishedTimes.length} 个发布时间`
+    : ''
+  return `${response?.message || '导入成功'}${countText}${timeText}`
+}
+
+const uploadExcel = async () => {
+  state.uploading = true
+  elements.uploadLabel.textContent = '正在上传…'
+  updateOperationButtons()
+  try {
+    const result = await window.exchangeApi.uploadExcel()
+    if (!result.canceled) showToast(summarizeUpload(result.response))
+  } catch (error) {
+    showToast(`上传失败：${cleanError(error)}`, true)
+  } finally {
+    state.uploading = false
+    elements.uploadLabel.textContent = '上传 Excel'
+    updateOperationButtons()
+  }
+}
+
+const importToday = async () => {
+  state.importing = true
+  elements.importTodayLabel.textContent = '正在导入…'
+  updateOperationButtons()
+  try {
+    const response = await window.exchangeApi.importToday()
+    showToast(summarizeUpload(response))
+  } catch (error) {
+    showToast(`导入今日数据失败：${cleanError(error)}`, true)
+  } finally {
+    state.importing = false
+    elements.importTodayLabel.textContent = '导入今日数据'
+    updateOperationButtons()
+  }
+}
+
 const exportRates = async () => {
   if (!state.data || state.selected.size === 0) return
   state.exporting = true
-  elements.exportButton.textContent = '正在导出…'
+  elements.exportLabel.textContent = '正在导出…'
   updateSelectionUi()
 
   try {
@@ -264,7 +381,7 @@ const exportRates = async () => {
     showToast(`导出失败：${cleanError(error)}`, true)
   } finally {
     state.exporting = false
-    elements.exportButton.innerHTML = '<span class="button-icon download-icon" aria-hidden="true">↓</span>导出 Excel'
+    elements.exportLabel.textContent = '导出 Excel'
     updateSelectionUi()
   }
 }
@@ -279,15 +396,73 @@ const updateUnit = (rawValue) => {
   if (![1, 100].includes(unit)) return
   state.unit = unit
   localStorage.setItem('boc-unit', String(unit))
+  elements.unitValue.textContent = String(unit)
+  for (const option of elements.unitOptions) {
+    const selected = Number(option.dataset.value) === unit
+    option.classList.toggle('selected', selected)
+    option.setAttribute('aria-selected', String(selected))
+    option.tabIndex = selected ? 0 : -1
+  }
   if (state.data) {
     renderSummary()
     renderTable()
   }
 }
 
-elements.unitInput.value = String(state.unit)
-elements.unitInput.addEventListener('change', (event) => {
-  updateUnit(event.target.value)
+const setUnitMenuOpen = (open, focusSelected = false) => {
+  elements.unitDropdown.classList.toggle('open', open)
+  elements.unitInput.setAttribute('aria-expanded', String(open))
+  elements.unitMenu.hidden = !open
+  if (open && focusSelected) {
+    elements.unitOptions.find((option) => option.getAttribute('aria-selected') === 'true')?.focus()
+  }
+}
+
+const focusUnitOption = (offset) => {
+  const currentIndex = elements.unitOptions.indexOf(document.activeElement)
+  const nextIndex = currentIndex < 0
+    ? 0
+    : (currentIndex + offset + elements.unitOptions.length) % elements.unitOptions.length
+  elements.unitOptions[nextIndex].focus()
+}
+
+updateUnit(state.unit)
+elements.unitInput.addEventListener('click', () => {
+  setUnitMenuOpen(elements.unitMenu.hidden)
+})
+elements.unitInput.addEventListener('keydown', (event) => {
+  if (['ArrowDown', 'ArrowUp'].includes(event.key)) {
+    event.preventDefault()
+    setUnitMenuOpen(true, true)
+  } else if (event.key === 'Escape') {
+    setUnitMenuOpen(false)
+  }
+})
+for (const option of elements.unitOptions) {
+  option.addEventListener('click', () => {
+    updateUnit(option.dataset.value)
+    setUnitMenuOpen(false)
+    elements.unitInput.focus()
+  })
+  option.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      focusUnitOption(event.key === 'ArrowDown' ? 1 : -1)
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault()
+      elements.unitOptions[event.key === 'Home' ? 0 : elements.unitOptions.length - 1].focus()
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      setUnitMenuOpen(false)
+      elements.unitInput.focus()
+    }
+  })
+}
+document.addEventListener('pointerdown', (event) => {
+  if (!elements.unitDropdown.contains(event.target)) setUnitMenuOpen(false)
+})
+document.addEventListener('focusin', (event) => {
+  if (!elements.unitDropdown.contains(event.target)) setUnitMenuOpen(false)
 })
 
 elements.selectAll.addEventListener('change', () => {
@@ -301,14 +476,23 @@ elements.selectAll.addEventListener('change', () => {
 
 elements.refreshButton.addEventListener('click', () => {
   if (state.loading || state.refreshCooldown > 0) return
+  elements.queryDate.value = getToday()
+  syncDateControls()
   startRefreshCooldown()
-  loadRates()
+  loadRates(() => window.exchangeApi.fetchRates(), '正在刷新今日中国银行外汇牌价…')
 })
-elements.retryButton.addEventListener('click', loadRates)
+elements.retryButton.addEventListener('click', () => loadRates())
 elements.exportButton.addEventListener('click', exportRates)
+elements.queryDate.addEventListener('change', syncDateControls)
+elements.queryButton.addEventListener('click', queryRates)
+elements.uploadButton.addEventListener('click', uploadExcel)
+elements.importTodayButton.addEventListener('click', importToday)
 elements.defaultSelectionButton.addEventListener('click', () => {
   if (!state.data) return
-  state.selected = new Set(state.data.defaultCurrencyCodes)
+  const defaultCodes = new Set(state.data.defaultCurrencyCodes)
+  state.selected = new Set(
+    state.data.rates.filter((rate) => defaultCodes.has(rate.code)).map(getRateKey),
+  )
   renderTable()
 })
 elements.selectAllButton.addEventListener('click', () => {
@@ -321,4 +505,6 @@ elements.clearSelectionButton.addEventListener('click', () => {
   renderTable()
 })
 
+elements.queryDate.value = getToday()
+syncDateControls()
 loadRates()

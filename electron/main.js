@@ -1,6 +1,16 @@
 const { app, BrowserWindow, dialog, ipcMain, net } = require('electron')
+const fs = require('fs')
 const path = require('path')
-const { fetchExchangeRates, exportRatesToExcel } = require('./services/exchangeService')
+const {
+  fetchExchangeRates,
+  queryHistoricalRates,
+  createUploadWorkbookBuffer,
+  uploadWorkbook,
+  exportRatesToExcel,
+} = require('./services/exchangeService')
+
+const MAX_UPLOAD_SIZE = 5 * 1024 * 1024
+const electronFetch = (url, options) => net.fetch(url, options)
 
 let mainWindow
 
@@ -28,8 +38,38 @@ const createWindow = () => {
 }
 
 ipcMain.handle('rates:fetch', async () => (
-  fetchExchangeRates((url, options) => net.fetch(url, options))
+  fetchExchangeRates(electronFetch)
 ))
+
+ipcMain.handle('rates:query-history', async (_event, date) => (
+  queryHistoricalRates(electronFetch, date)
+))
+
+ipcMain.handle('rates:upload-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择要导入的外汇牌价 Excel',
+    properties: ['openFile'],
+    filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }],
+  })
+  if (result.canceled || result.filePaths.length === 0) return { canceled: true }
+
+  const filePath = result.filePaths[0]
+  if (path.extname(filePath).toLowerCase() !== '.xlsx') throw new Error('仅支持 .xlsx 文件')
+
+  const file = await fs.promises.stat(filePath)
+  if (!file.isFile()) throw new Error('请选择有效的 Excel 文件')
+  if (file.size > MAX_UPLOAD_SIZE) throw new Error('Excel 文件不能超过 5 MB')
+
+  const response = await uploadWorkbook(electronFetch, await fs.promises.readFile(filePath), path.basename(filePath))
+  return { canceled: false, response }
+})
+
+ipcMain.handle('rates:import-today', async () => {
+  const rates = await fetchExchangeRates(electronFetch)
+  const fileName = `中行外汇牌价_${rates.date}.xlsx`
+  const buffer = createUploadWorkbookBuffer({ rates: rates.rates, unit: 100 })
+  return uploadWorkbook(electronFetch, buffer, fileName)
+})
 
 ipcMain.handle('rates:export', async (_event, payload) => {
   const rates = Array.isArray(payload?.rates) ? payload.rates : []

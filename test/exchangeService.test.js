@@ -6,11 +6,17 @@ const test = require('node:test')
 const XLSX = require('xlsx')
 const {
   API_URL,
+  QUERY_URL,
+  UPLOAD_URL,
   DEFAULT_CURRENCY_CODES,
   CURRENCY_CODES_BY_NAME,
   parseBocPage,
   fetchExchangeRates,
+  normalizeDatabaseResult,
+  queryHistoricalRates,
   scaleRatesToUnit,
+  createUploadWorkbookBuffer,
+  uploadWorkbook,
   exportRatesToExcel,
 } = require('../electron/services/exchangeService')
 
@@ -88,6 +94,122 @@ test('scaleRatesToUnit converts prices from the original 100 unit quote', () => 
   assert.equal(scaled[0].exchangeSell, 6.7691)
   assert.equal(scaled[1].exchangeBuy, null)
   assert.throws(() => scaleRatesToUnit(parsed.rates, 10), /只能选择 1 或 100/)
+})
+
+test('normalizeDatabaseResult maps API records and preserves nullable prices', () => {
+  const result = normalizeDatabaseResult({
+    state: true,
+    data: {
+      result: [{
+        currencyCode: 'USD',
+        currencyName: '美元',
+        bankUnit: 100,
+        spotBuyingRate: 674.5,
+        cashBuyingRate: null,
+        spotSellingRate: 677.33,
+        cashSellingRate: '',
+        bocConversionRate: 679.17,
+        publishedAt: '2026-08-04 09:39:21',
+      }],
+    },
+  }, '2026-08-04 09:39:21')
+
+  assert.equal(result.source, '外汇牌价历史数据库')
+  assert.equal(result.date, '2026-08-04')
+  assert.deepEqual(result.rates[0], {
+    code: 'USD',
+    name: '美元',
+    unit: 100,
+    exchangeBuy: 674.5,
+    cashBuy: null,
+    exchangeSell: 677.33,
+    cashSell: null,
+    middle: 679.17,
+    updatedAt: '2026-08-04 09:39:21',
+  })
+})
+
+test('normalizeDatabaseResult keeps an empty successful query as table data', () => {
+  const result = normalizeDatabaseResult({
+    state: true,
+    message: '查询成功',
+    data: { result: [] },
+  }, '2026-08-03')
+
+  assert.equal(result.date, '2026-08-03')
+  assert.equal(result.updatedAt, '2026-08-03')
+  assert.deepEqual(result.rates, [])
+})
+
+test('queryHistoricalRates posts a historical date', async () => {
+  const date = '2026-08-04'
+  const result = await queryHistoricalRates(async (url, options) => {
+    assert.equal(url, QUERY_URL)
+    assert.equal(options.method, 'POST')
+    assert.equal(options.headers['Content-Type'], 'application/json')
+    assert.deepEqual(JSON.parse(options.body), { date: '2026-08-04' })
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        state: true,
+        data: {
+          result: [{
+            currencyCode: 'EUR',
+            currencyName: '欧元',
+            bankUnit: 100,
+            spotBuyingRate: 780,
+            cashBuyingRate: 780,
+            spotSellingRate: 785,
+            cashSellingRate: 785,
+            bocConversionRate: 783,
+            publishedAt: '2026-08-04 09:39:21',
+          }],
+        },
+      }),
+    }
+  }, date)
+
+  assert.equal(result.rates[0].code, 'EUR')
+  await assert.rejects(
+    queryHistoricalRates(async () => assert.fail('should not request'), '2026-08-04 09:39:21'),
+    /YYYY-MM-DD/,
+  )
+})
+
+test('createUploadWorkbookBuffer uses the API sheet and header layout', () => {
+  const parsed = parseBocPage(sampleHtml)
+  const buffer = createUploadWorkbookBuffer({ rates: parsed.rates, unit: 100 })
+  const workbook = XLSX.read(buffer, { type: 'buffer' })
+  const sheet = workbook.Sheets['中行外汇牌价']
+
+  assert.deepEqual(workbook.SheetNames, ['中行外汇牌价'])
+  assert.equal(sheet.A1.v, '序号')
+  assert.equal(sheet.B1.v, '币种代码')
+  assert.equal(sheet.J1.v, '发布时间')
+  assert.equal(sheet.B2.v, 'USD')
+  assert.equal(sheet.J2.v, '2026-08-03 18:24:17')
+})
+
+test('uploadWorkbook sends an xlsx multipart file', async () => {
+  const response = await uploadWorkbook(async (url, options) => {
+    assert.equal(url, UPLOAD_URL)
+    assert.equal(options.method, 'POST')
+    const file = options.body.get('file')
+    assert.equal(file.name, '中行外汇牌价_2026-08-04.xlsx')
+    assert.deepEqual(Buffer.from(await file.arrayBuffer()), Buffer.from('workbook'))
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ state: true, message: '上传成功', data: { rowCount: 1 } }),
+    }
+  }, Buffer.from('workbook'), '中行外汇牌价_2026-08-04.xlsx')
+
+  assert.equal(response.state, true)
+  await assert.rejects(
+    uploadWorkbook(async () => assert.fail('should not request'), Buffer.from('x'), 'rates.xls'),
+    /仅支持 \.xlsx/,
+  )
 })
 
 test('exportRatesToExcel writes readable BOC quote and notes sheets', (t) => {
